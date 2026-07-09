@@ -70,6 +70,14 @@ Interfaces that are down or have no carrier/running state are skipped automatica
 
 ## Usage
 
+Create an initial baseline first. This records current devices as `known` so they do not appear as new in the dashboard:
+
+```bash
+./lanwatchgo baseline
+```
+
+If the dashboard already has old `new` events from before the baseline, use `Archive current new` in the web UI. That keeps the history but hides those already-reviewed devices from the “new devices in the last 10 minutes” panel.
+
 Run one scan:
 
 ```bash
@@ -159,8 +167,12 @@ The dashboard includes:
 
 - Summary counters for new devices in the last 10 minutes, active devices, changed IPs, offline devices, and total devices.
 - A highlighted table at the top for devices first seen in the last 10 minutes.
+- An `Archive current new` button to acknowledge the current new-device list without deleting history.
+- Auto-scan controls with a configurable interval in seconds.
 - A device menu directly below that table with tabs for known active devices, history, subnets, changed IP, offline, and all devices.
 - One subnet tab per discovered subnet, based on the subnet stored for each device.
+
+When running `serve`, scan activity is logged in the terminal where `go run . serve ...` is running. Logs include selected targets, ping sweep size, ARP/neighbor entries, observation count, scan summary, archive actions, and auto-scan start/stop/ticks.
 
 ## Notes
 

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -85,8 +86,9 @@ type HistoryEvent struct {
 }
 
 type State struct {
-	Devices map[string]DeviceRecord `json:"devices"`
-	History []HistoryEvent          `json:"history"`
+	Devices           map[string]DeviceRecord `json:"devices"`
+	History           []HistoryEvent          `json:"history"`
+	NewArchivedBefore string                  `json:"new_archived_before,omitempty"`
 }
 
 type ScanReport struct {
@@ -123,6 +125,8 @@ func main() {
 	switch os.Args[1] {
 	case "scan":
 		err = commandScan(os.Args[2:])
+	case "baseline":
+		err = commandBaseline(os.Args[2:])
 	case "watch":
 		err = commandWatch(os.Args[2:])
 	case "list":
@@ -156,6 +160,20 @@ func commandScan(args []string) error {
 	if err != nil {
 		return err
 	}
+	PrintReport(report)
+	return nil
+}
+
+func commandBaseline(args []string) error {
+	cfg, err := configFromFlags("baseline", args)
+	if err != nil {
+		return err
+	}
+	report, err := RunBaseline(cfg)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Baseline saved: %d active devices recorded as known.\n", len(report.Known))
 	PrintReport(report)
 	return nil
 }
@@ -529,6 +547,7 @@ func printUsage() {
 	fmt.Println(`LanWatch Go
 
 Usage:
+  lanwatchgo baseline [--config config.json] [--interface NAME] [--subnet CIDR]
   lanwatchgo scan [--config config.json] [--interface NAME] [--subnet CIDR]
   lanwatchgo watch [--interval seconds]
   lanwatchgo list
@@ -541,6 +560,7 @@ Usage:
   lanwatchgo serve --host 0.0.0.0 --port 5991
 
 Notes:
+  Run baseline once to record current devices as known before watching for new devices.
   Local interface subnets are detected automatically.
   Interfaces that are down or have no carrier/running state are skipped.
   Use --subnet multiple times or config extra_subnets to add routed networks.
@@ -644,35 +664,73 @@ func LoadConfig(path string) (Config, error) {
 }
 
 func RunScan(cfg Config) (ScanReport, error) {
-	targets, err := BuildTargets(cfg)
+	started := time.Now()
+	log.Printf("scan: starting state=%s interfaces=%s extra_subnets=%s", cfg.StatePath, strings.Join(cfg.Interfaces, ","), strings.Join(cfg.ExtraSubnets, ","))
+	observations, targets, err := Discover(cfg)
 	if err != nil {
+		log.Printf("scan: failed during discovery: %v", err)
 		return ScanReport{}, err
 	}
-	if len(targets) == 0 {
-		return ScanReport{}, errors.New("no target subnets detected; add extra_subnets in config")
-	}
-
-	arpBefore, _ := ReadARPTable()
-	_ = arpBefore
-	alive, err := PingSweep(targets, cfg)
-	if err != nil {
-		return ScanReport{}, err
-	}
-	arpEntries, err := ReadARPTable()
-	if err != nil {
-		return ScanReport{}, err
-	}
-	observations := BuildObservations(targets, alive, arpEntries, time.Duration(cfg.PingTimeoutMS)*time.Millisecond)
-
 	state, err := LoadState(cfg.StatePath)
 	if err != nil {
+		log.Printf("scan: failed loading state: %v", err)
 		return ScanReport{}, err
 	}
 	report := ApplyScan(state, observations, targets)
 	if err := SaveState(cfg.StatePath, state); err != nil {
+		log.Printf("scan: failed saving state: %v", err)
 		return ScanReport{}, err
 	}
+	log.Printf("scan: complete duration=%s %s", time.Since(started).Round(time.Millisecond), reportLogSummary(report))
 	return report, nil
+}
+
+func RunBaseline(cfg Config) (ScanReport, error) {
+	started := time.Now()
+	log.Printf("baseline: starting state=%s interfaces=%s extra_subnets=%s", cfg.StatePath, strings.Join(cfg.Interfaces, ","), strings.Join(cfg.ExtraSubnets, ","))
+	observations, targets, err := Discover(cfg)
+	if err != nil {
+		log.Printf("baseline: failed during discovery: %v", err)
+		return ScanReport{}, err
+	}
+	state, err := LoadState(cfg.StatePath)
+	if err != nil {
+		log.Printf("baseline: failed loading state: %v", err)
+		return ScanReport{}, err
+	}
+	report := ApplyBaseline(state, observations, targets)
+	if err := SaveState(cfg.StatePath, state); err != nil {
+		log.Printf("baseline: failed saving state: %v", err)
+		return ScanReport{}, err
+	}
+	log.Printf("baseline: complete duration=%s known=%d offline=%d targets=%s", time.Since(started).Round(time.Millisecond), len(report.Known), len(report.Offline), targetLabel(report.Targets))
+	return report, nil
+}
+
+func Discover(cfg Config) ([]Observation, []TargetSubnet, error) {
+	started := time.Now()
+	targets, err := BuildTargets(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(targets) == 0 {
+		return nil, nil, errors.New("no target subnets detected; add extra_subnets in config")
+	}
+	log.Printf("discover: targets=%s", targetLabel(targets))
+
+	alive, err := PingSweep(targets, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Printf("discover: ping sweep alive=%d", len(alive))
+	arpEntries, err := ReadARPTable()
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Printf("discover: arp/neigh entries=%d", len(arpEntries))
+	observations := BuildObservations(targets, alive, arpEntries, time.Duration(cfg.PingTimeoutMS)*time.Millisecond)
+	log.Printf("discover: observations=%d duration=%s", len(observations), time.Since(started).Round(time.Millisecond))
+	return observations, targets, nil
 }
 
 func BuildTargets(cfg Config) ([]TargetSubnet, error) {
@@ -819,6 +877,7 @@ func PingSweep(targets []TargetSubnet, cfg Config) (map[string]bool, error) {
 	if timeout <= 0 {
 		timeout = 700 * time.Millisecond
 	}
+	log.Printf("ping: scanning ips=%d concurrency=%d timeout=%s", len(ips), concurrency, timeout)
 
 	jobs := make(chan net.IP)
 	results := make(chan string)
@@ -1139,6 +1198,88 @@ func ApplyScan(state *State, observations []Observation, targets []TargetSubnet)
 	return report
 }
 
+func ApplyBaseline(state *State, observations []Observation, targets []TargetSubnet) ScanReport {
+	now := time.Now().UTC().Format(time.RFC3339)
+	seen := make(map[string]bool)
+
+	report := ScanReport{
+		ScannedAt: now,
+		Targets:   targets,
+	}
+
+	if state.Devices == nil {
+		state.Devices = make(map[string]DeviceRecord)
+	}
+	state.NewArchivedBefore = now
+
+	for _, obs := range observations {
+		key := obs.Key
+		if key == "" {
+			continue
+		}
+		seen[key] = true
+		existing := state.Devices[key]
+		firstSeen := existing.FirstSeen
+		if firstSeen == "" {
+			firstSeen = now
+		}
+
+		record := DeviceRecord{
+			Key:        key,
+			KeyType:    obs.KeyType,
+			IP:         obs.IP,
+			MAC:        obs.MAC,
+			Vendor:     coalesce(obs.Vendor, existing.Vendor),
+			Hostname:   coalesce(obs.Hostname, existing.Hostname),
+			Interface:  coalesce(obs.Interface, existing.Interface),
+			Subnet:     coalesce(obs.Subnet, existing.Subnet),
+			FirstSeen:  firstSeen,
+			LastSeen:   now,
+			LastStatus: "known",
+		}
+		state.Devices[key] = record
+		state.History = append(state.History, HistoryEvent{
+			ScannedAt:  now,
+			Key:        key,
+			KeyType:    record.KeyType,
+			IP:         record.IP,
+			PreviousIP: existing.IP,
+			MAC:        record.MAC,
+			Vendor:     record.Vendor,
+			Hostname:   record.Hostname,
+			Interface:  record.Interface,
+			Subnet:     record.Subnet,
+			Status:     "known",
+		})
+		report.Known = append(report.Known, record)
+	}
+
+	for key, existing := range state.Devices {
+		if seen[key] || existing.LastStatus == "offline" {
+			continue
+		}
+		existing.LastStatus = "offline"
+		state.Devices[key] = existing
+		state.History = append(state.History, HistoryEvent{
+			ScannedAt:  now,
+			Key:        existing.Key,
+			KeyType:    existing.KeyType,
+			IP:         existing.IP,
+			PreviousIP: existing.IP,
+			MAC:        existing.MAC,
+			Vendor:     existing.Vendor,
+			Hostname:   existing.Hostname,
+			Interface:  existing.Interface,
+			Subnet:     existing.Subnet,
+			Status:     "offline",
+		})
+		report.Offline = append(report.Offline, existing)
+	}
+
+	sortReport(&report)
+	return report
+}
+
 func LoadState(path string) (*State, error) {
 	state := &State{Devices: map[string]DeviceRecord{}}
 	data, err := os.ReadFile(path)
@@ -1258,6 +1399,72 @@ func Serve(cfg Config, host string, port int) error {
 	var mu sync.Mutex
 	var lastReport *ScanReport
 	var lastError string
+	var scanMu sync.Mutex
+	var autoMu sync.Mutex
+	var autoRunning bool
+	var autoInterval = 10
+	var autoStop chan struct{}
+
+	runAndStoreScan := func() {
+		scanMu.Lock()
+		defer scanMu.Unlock()
+
+		log.Printf("server: scan requested")
+		report, err := RunScan(cfg)
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			lastError = err.Error()
+			log.Printf("server: scan failed: %v", err)
+			return
+		}
+		lastReport = &report
+		lastError = ""
+		log.Printf("server: scan stored %s", reportLogSummary(report))
+	}
+
+	stopAutoScan := func() {
+		autoMu.Lock()
+		defer autoMu.Unlock()
+		if autoRunning && autoStop != nil {
+			close(autoStop)
+			log.Printf("autoscan: stopped")
+		}
+		autoRunning = false
+		autoStop = nil
+	}
+
+	startAutoScan := func(interval int) {
+		if interval <= 0 {
+			interval = 10
+		}
+
+		autoMu.Lock()
+		if autoRunning && autoStop != nil {
+			close(autoStop)
+		}
+		stop := make(chan struct{})
+		autoStop = stop
+		autoRunning = true
+		autoInterval = interval
+		autoMu.Unlock()
+		log.Printf("autoscan: started interval=%ds", interval)
+
+		go func() {
+			runAndStoreScan()
+			ticker := time.NewTicker(time.Duration(interval) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					log.Printf("autoscan: tick")
+					runAndStoreScan()
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -1283,10 +1490,16 @@ func Serve(cfg Config, host string, port int) error {
 		report := lastReport
 		errText := lastError
 		mu.Unlock()
+		autoMu.Lock()
+		running := autoRunning
+		interval := autoInterval
+		autoMu.Unlock()
 		data := dashboardData{
 			Config:       cfg,
 			Report:       report,
 			Error:        errText,
+			AutoRunning:  running,
+			AutoInterval: interval,
 			Devices:      devices,
 			Active:       active,
 			Changed:      changed,
@@ -1305,20 +1518,50 @@ func Serve(cfg Config, host string, port int) error {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		report, err := RunScan(cfg)
+		log.Printf("http: run scan button clicked")
+		runAndStoreScan()
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("/archive-new", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		state, err := LoadState(cfg.StatePath)
+		if err == nil {
+			state.NewArchivedBefore = time.Now().UTC().Format(time.RFC3339)
+			err = SaveState(cfg.StatePath, state)
+		}
 		mu.Lock()
 		if err != nil {
 			lastError = err.Error()
 		} else {
-			lastReport = &report
 			lastError = ""
+			log.Printf("archive: current new devices archived before=%s", state.NewArchivedBefore)
 		}
 		mu.Unlock()
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
+	mux.HandleFunc("/autoscan", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		switch r.FormValue("action") {
+		case "stop":
+			stopAutoScan()
+		default:
+			interval, err := strconv.Atoi(r.FormValue("interval"))
+			if err != nil || interval <= 0 {
+				interval = 10
+			}
+			startAutoScan(interval)
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
 
 	address := fmt.Sprintf("%s:%d", host, port)
-	fmt.Printf("LanWatch Go dashboard: http://%s\n", address)
+	log.Printf("server: starting dashboard http://%s state=%s interfaces=%s extra_subnets=%s", address, cfg.StatePath, strings.Join(cfg.Interfaces, ","), strings.Join(cfg.ExtraSubnets, ","))
 	return http.ListenAndServe(address, mux)
 }
 
@@ -1326,6 +1569,8 @@ type dashboardData struct {
 	Config       Config
 	Report       *ScanReport
 	Error        string
+	AutoRunning  bool
+	AutoInterval int
 	Devices      []DeviceRecord
 	Active       []DeviceRecord
 	Changed      []DeviceRecord
@@ -1400,6 +1645,9 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     .device-tabs { margin-top: 18px; }
     .device-tabs-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
     .device-tabs-head .subtle { color: var(--muted); font-size: 12px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .inline-form { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .inline-form input[type="number"] { width: 88px; min-width: 88px; }
     .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; min-width: 860px; }
     th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -1424,8 +1672,9 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     @media (max-width: 860px) {
       main, header { padding-left: 14px; padding-right: 14px; }
       .summary { grid-template-columns: 1fr 1fr; }
-      .device-tabs-head { align-items: flex-start; flex-direction: column; }
+      .device-tabs-head, .section-head { align-items: flex-start; flex-direction: column; }
       input { min-width: 0; width: 100%; }
+      .inline-form input[type="number"] { width: 88px; min-width: 88px; }
     }
   </style>
 </head>
@@ -1443,6 +1692,16 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     {{ if .Error }}<div class="notice">{{ .Error }}</div>{{ end }}
     <div class="bar">
       <a class="button" href="/">Refresh</a>
+      <form class="inline-form" method="post" action="/autoscan">
+        <span>{{ if .AutoRunning }}Auto scan on{{ else }}Auto scan off{{ end }}</span>
+        <input type="number" min="1" name="interval" value="{{ .AutoInterval }}" aria-label="Auto scan interval seconds">
+        <span>sec</span>
+        {{ if .AutoRunning }}
+        <button type="submit" name="action" value="stop">Stop</button>
+        {{ else }}
+        <button type="submit" name="action" value="start">Start</button>
+        {{ end }}
+      </form>
     </div>
     <div class="summary">
       <div class="metric"><span>New 10 min</span><strong>{{ len .NewRecent }}</strong></div>
@@ -1453,7 +1712,12 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     </div>
 
     <section class="highlight">
-      <h2>New devices connected in the last 10 minutes</h2>
+      <div class="section-head">
+        <h2>New devices connected in the last 10 minutes</h2>
+        <form method="post" action="/archive-new">
+          <button type="submit">Archive current new</button>
+        </form>
+      </div>
       {{ template "devices" dict "Rows" .NewRecent }}
     </section>
 
@@ -1608,6 +1872,10 @@ func recentHistory(history []HistoryEvent, query string, limit int) []HistoryEve
 
 func recentNewDevices(state *State, window time.Duration) []DeviceRecord {
 	cutoff := time.Now().UTC().Add(-window)
+	var archivedBefore time.Time
+	if state.NewArchivedBefore != "" {
+		archivedBefore, _ = time.Parse(time.RFC3339, state.NewArchivedBefore)
+	}
 	seen := make(map[string]bool)
 	var rows []DeviceRecord
 
@@ -1618,6 +1886,9 @@ func recentNewDevices(state *State, window time.Duration) []DeviceRecord {
 		}
 		scannedAt, err := time.Parse(time.RFC3339, event.ScannedAt)
 		if err != nil || scannedAt.Before(cutoff) {
+			continue
+		}
+		if !archivedBefore.IsZero() && !scannedAt.After(archivedBefore) {
 			continue
 		}
 		seen[event.Key] = true
@@ -1746,6 +2017,19 @@ func targetLabel(targets []TargetSubnet) string {
 		}
 	}
 	return strings.Join(labels, ", ")
+}
+
+func reportLogSummary(report ScanReport) string {
+	active := len(report.New) + len(report.ChangedIP) + len(report.Known)
+	return fmt.Sprintf(
+		"active=%d new=%d changed_ip=%d offline=%d known=%d targets=%s",
+		active,
+		len(report.New),
+		len(report.ChangedIP),
+		len(report.Offline),
+		len(report.Known),
+		targetLabel(report.Targets),
+	)
 }
 
 func ResolveHostname(ip string, timeout time.Duration) string {
