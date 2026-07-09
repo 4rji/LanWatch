@@ -29,6 +29,8 @@ const (
 
 type Config struct {
 	ScanInterval      int      `json:"scan_interval"`
+	Interfaces        []string `json:"interfaces"`
+	ExcludeInterfaces []string `json:"exclude_interfaces"`
 	ExtraSubnets      []string `json:"extra_subnets"`
 	StatePath         string   `json:"state_path"`
 	PingTimeoutMS     int      `json:"ping_timeout_ms"`
@@ -164,8 +166,15 @@ func commandWatch(args []string) error {
 	statePath := fs.String("state", "", "state JSON path")
 	interval := fs.Int("interval", 0, "scan interval in seconds")
 	var extra stringList
+	var interfaces stringList
+	var excludeInterfaces stringList
 	fs.Var(&extra, "subnet", "extra subnet to scan; repeatable")
+	fs.Var(&interfaces, "interface", "interface to include; repeatable")
+	fs.Var(&excludeInterfaces, "exclude-interface", "interface to exclude; repeatable")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := applyScanPositionals(fs.Args(), &interfaces); err != nil {
 		return err
 	}
 
@@ -173,7 +182,7 @@ func commandWatch(args []string) error {
 	if err != nil {
 		return err
 	}
-	applyFlagOverrides(&cfg, *statePath, extra)
+	applyFlagOverrides(&cfg, *statePath, extra, interfaces, excludeInterfaces)
 	if *interval > 0 {
 		cfg.ScanInterval = *interval
 	}
@@ -220,7 +229,7 @@ func commandHistory(args []string) error {
 	if err != nil {
 		return err
 	}
-	applyFlagOverrides(&cfg, *statePath, nil)
+	applyFlagOverrides(&cfg, *statePath, nil, nil, nil)
 	state, err := LoadState(cfg.StatePath)
 	if err != nil {
 		return err
@@ -243,7 +252,7 @@ func commandForget(args []string) error {
 	if err != nil {
 		return err
 	}
-	applyFlagOverrides(&cfg, *statePath, nil)
+	applyFlagOverrides(&cfg, *statePath, nil, nil, nil)
 	state, err := LoadState(cfg.StatePath)
 	if err != nil {
 		return err
@@ -271,10 +280,14 @@ func commandForget(args []string) error {
 
 func commandInterfaces(args []string) error {
 	fs := flag.NewFlagSet("interfaces", flag.ContinueOnError)
+	var interfaces stringList
+	var excludeInterfaces stringList
+	fs.Var(&interfaces, "interface", "interface to include; repeatable")
+	fs.Var(&excludeInterfaces, "exclude-interface", "interface to exclude; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	targets, err := AutoInterfaceSubnets()
+	targets, err := AutoInterfaceSubnets(interfaces, excludeInterfaces)
 	if err != nil {
 		return err
 	}
@@ -295,6 +308,8 @@ func commandServe(args []string) error {
 	host := "127.0.0.1"
 	port := 5000
 	var extra stringList
+	var interfaces stringList
+	var excludeInterfaces stringList
 	var positionals []string
 
 	for i := 0; i < len(args); i++ {
@@ -382,6 +397,40 @@ func commandServe(args []string) error {
 			if err := extra.Set(strings.TrimPrefix(arg, "--subnet=")); err != nil {
 				return err
 			}
+		case arg == "-interface" || arg == "--interface":
+			value, next, err := nextArg(args, i, arg)
+			if err != nil {
+				return err
+			}
+			if err := interfaces.Set(value); err != nil {
+				return err
+			}
+			i = next
+		case strings.HasPrefix(arg, "-interface="):
+			if err := interfaces.Set(strings.TrimPrefix(arg, "-interface=")); err != nil {
+				return err
+			}
+		case strings.HasPrefix(arg, "--interface="):
+			if err := interfaces.Set(strings.TrimPrefix(arg, "--interface=")); err != nil {
+				return err
+			}
+		case arg == "-exclude-interface" || arg == "--exclude-interface":
+			value, next, err := nextArg(args, i, arg)
+			if err != nil {
+				return err
+			}
+			if err := excludeInterfaces.Set(value); err != nil {
+				return err
+			}
+			i = next
+		case strings.HasPrefix(arg, "-exclude-interface="):
+			if err := excludeInterfaces.Set(strings.TrimPrefix(arg, "-exclude-interface=")); err != nil {
+				return err
+			}
+		case strings.HasPrefix(arg, "--exclude-interface="):
+			if err := excludeInterfaces.Set(strings.TrimPrefix(arg, "--exclude-interface=")); err != nil {
+				return err
+			}
 		case strings.HasPrefix(arg, "-"):
 			return fmt.Errorf("unknown serve option %q. Run: lanwatchgo serve --help", arg)
 		default:
@@ -415,7 +464,7 @@ func commandServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	applyFlagOverrides(&cfg, statePath, extra)
+	applyFlagOverrides(&cfg, statePath, extra, interfaces, excludeInterfaces)
 	return Serve(cfg, host, port)
 }
 
@@ -424,37 +473,68 @@ func configFromFlags(name string, args []string) (Config, error) {
 	configPath := fs.String("config", defaultConfigPath, "config file path")
 	statePath := fs.String("state", "", "state JSON path")
 	var extra stringList
+	var interfaces stringList
+	var excludeInterfaces stringList
 	fs.Var(&extra, "subnet", "extra subnet to scan; repeatable")
+	fs.Var(&interfaces, "interface", "interface to include; repeatable")
+	fs.Var(&excludeInterfaces, "exclude-interface", "interface to exclude; repeatable")
 	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+	if err := applyScanPositionals(fs.Args(), &interfaces); err != nil {
 		return Config{}, err
 	}
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		return Config{}, err
 	}
-	applyFlagOverrides(&cfg, *statePath, extra)
+	applyFlagOverrides(&cfg, *statePath, extra, interfaces, excludeInterfaces)
 	return cfg, nil
 }
 
-func applyFlagOverrides(cfg *Config, statePath string, extra stringList) {
+func applyFlagOverrides(cfg *Config, statePath string, extra, interfaces, excludeInterfaces stringList) {
 	if statePath != "" {
 		cfg.StatePath = statePath
 	}
 	if len(extra) > 0 {
 		cfg.ExtraSubnets = append(cfg.ExtraSubnets, extra...)
 	}
+	if len(interfaces) > 0 {
+		cfg.Interfaces = append(cfg.Interfaces, interfaces...)
+	}
+	if len(excludeInterfaces) > 0 {
+		cfg.ExcludeInterfaces = append(cfg.ExcludeInterfaces, excludeInterfaces...)
+	}
+}
+
+func applyScanPositionals(args []string, interfaces *stringList) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if args[0] == "interface" || args[0] == "interfaces" {
+		if len(args) == 1 {
+			return errors.New("usage: lanwatchgo scan --interface enp0s3")
+		}
+		for _, name := range args[1:] {
+			if err := interfaces.Set(name); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("unexpected arguments: %s. Use --interface enp0s3, --subnet CIDR, or run 'lanwatchgo help'", strings.Join(args, " "))
 }
 
 func printUsage() {
 	fmt.Println(`LanWatch Go
 
 Usage:
-  lanwatchgo scan [--config config.json] [--subnet CIDR]
+  lanwatchgo scan [--config config.json] [--interface NAME] [--subnet CIDR]
   lanwatchgo watch [--interval seconds]
   lanwatchgo list
   lanwatchgo history <mac-or-ip>
   lanwatchgo forget <mac-or-ip>
-  lanwatchgo interfaces
+  lanwatchgo interfaces [--interface NAME]
   lanwatchgo serve
   lanwatchgo serve 5991
   lanwatchgo serve 0.0.0.0 5991
@@ -462,7 +542,9 @@ Usage:
 
 Notes:
   Local interface subnets are detected automatically.
+  Interfaces that are down or have no carrier/running state are skipped.
   Use --subnet multiple times or config extra_subnets to add routed networks.
+  Use --interface enp0s3 to scan only one interface.
   Brackets in documentation mean optional; do not type [ or ].`)
 }
 
@@ -488,6 +570,9 @@ Options:
   --config PATH        Config file. Default: config.json
   --state PATH         State file override
   --subnet CIDR        Extra subnet; repeatable
+  --interface NAME     Interface to include; repeatable
+  --exclude-interface NAME
+                       Interface to exclude; repeatable
 
 Do not type square brackets from examples like [--port 5000]; they only mean optional.`)
 }
@@ -540,26 +625,26 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("read config %s: %w", path, err)
 	}
-	if cfg.ScanInterval == 0 {
+	if cfg.ScanInterval <= 0 {
 		cfg.ScanInterval = 60
 	}
 	if cfg.StatePath == "" {
 		cfg.StatePath = defaultStatePath
 	}
-	if cfg.PingTimeoutMS == 0 {
+	if cfg.PingTimeoutMS <= 0 {
 		cfg.PingTimeoutMS = 700
 	}
-	if cfg.Concurrency == 0 {
+	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 128
 	}
-	if cfg.MaxHostsPerSubnet == 0 {
+	if cfg.MaxHostsPerSubnet <= 0 {
 		cfg.MaxHostsPerSubnet = 4096
 	}
 	return cfg, nil
 }
 
 func RunScan(cfg Config) (ScanReport, error) {
-	targets, err := BuildTargets(cfg.ExtraSubnets)
+	targets, err := BuildTargets(cfg)
 	if err != nil {
 		return ScanReport{}, err
 	}
@@ -590,22 +675,34 @@ func RunScan(cfg Config) (ScanReport, error) {
 	return report, nil
 }
 
-func BuildTargets(extraSubnets []string) ([]TargetSubnet, error) {
-	targets, err := AutoInterfaceSubnets()
+func BuildTargets(cfg Config) ([]TargetSubnet, error) {
+	targets, err := AutoInterfaceSubnets(cfg.Interfaces, cfg.ExcludeInterfaces)
 	if err != nil {
 		return nil, err
 	}
 	seen := make(map[string]bool)
-	merged := make([]TargetSubnet, 0, len(targets)+len(extraSubnets))
+	merged := make([]TargetSubnet, 0, len(targets)+len(cfg.ExtraSubnets))
 	for _, target := range targets {
 		if seen[target.CIDR] {
+			continue
+		}
+		addressCount := subnetAddressCount(target.Network)
+		if addressCount > uint64(cfg.MaxHostsPerSubnet) {
+			fmt.Fprintf(
+				os.Stderr,
+				"warning: skipping %s on %s: subnet has %d addresses, above max_hosts_per_subnet=%d\n",
+				target.CIDR,
+				target.Interface,
+				addressCount,
+				cfg.MaxHostsPerSubnet,
+			)
 			continue
 		}
 		seen[target.CIDR] = true
 		merged = append(merged, target)
 	}
 
-	for _, cidr := range extraSubnets {
+	for _, cidr := range cfg.ExtraSubnets {
 		cidr = strings.TrimSpace(cidr)
 		if cidr == "" {
 			continue
@@ -622,6 +719,15 @@ func BuildTargets(extraSubnets []string) ([]TargetSubnet, error) {
 		if seen[normalized] {
 			continue
 		}
+		addressCount := subnetAddressCount(network)
+		if addressCount > uint64(cfg.MaxHostsPerSubnet) {
+			return nil, fmt.Errorf(
+				"%s: subnet has %d addresses, above max_hosts_per_subnet=%d",
+				normalized,
+				addressCount,
+				cfg.MaxHostsPerSubnet,
+			)
+		}
 		seen[normalized] = true
 		merged = append(merged, TargetSubnet{
 			CIDR:    normalized,
@@ -636,14 +742,22 @@ func BuildTargets(extraSubnets []string) ([]TargetSubnet, error) {
 	return merged, nil
 }
 
-func AutoInterfaceSubnets() ([]TargetSubnet, error) {
+func AutoInterfaceSubnets(includeInterfaces, excludeInterfaces []string) ([]TargetSubnet, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
 	}
+	include := stringSet(includeInterfaces)
+	exclude := stringSet(excludeInterfaces)
 	var targets []TargetSubnet
 	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+		if len(include) > 0 && !include[iface.Name] {
+			continue
+		}
+		if exclude[iface.Name] {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagRunning == 0 {
 			continue
 		}
 		addrs, err := iface.Addrs()
@@ -756,11 +870,11 @@ func Ping(ip string, timeout time.Duration) bool {
 }
 
 func EnumerateHosts(network *net.IPNet, maxHosts int) ([]net.IP, error) {
-	ones, bits := network.Mask.Size()
+	_, bits := network.Mask.Size()
 	if bits != 32 {
 		return nil, errors.New("only IPv4 networks are supported")
 	}
-	hostCount := uint64(1) << uint(bits-ones)
+	hostCount := subnetAddressCount(network)
 	if hostCount > uint64(maxHosts) {
 		return nil, fmt.Errorf("subnet has %d addresses, above max_hosts_per_subnet=%d", hostCount, maxHosts)
 	}
@@ -785,6 +899,14 @@ func EnumerateHosts(network *net.IPNet, maxHosts int) ([]net.IP, error) {
 		}
 	}
 	return ips, nil
+}
+
+func subnetAddressCount(network *net.IPNet) uint64 {
+	ones, bits := network.Mask.Size()
+	if bits != 32 || ones < 0 {
+		return 0
+	}
+	return uint64(1) << uint(bits-ones)
 }
 
 type ARPEntry struct {
@@ -1741,6 +1863,17 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func stringSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = true
+		}
+	}
+	return set
 }
 
 func emptyDash(value string) string {
