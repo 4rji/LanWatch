@@ -39,6 +39,8 @@ After installation, the CLI command is:
 lanwatch --help
 ```
 
+The web dashboard uses Flask, which is installed as part of the normal dependencies.
+
 ## Configuration
 
 Copy the example config if you want to override defaults:
@@ -123,13 +125,33 @@ Use a custom config file:
 lanwatch scan --config ./config.yaml
 ```
 
+Run the web dashboard on port 5000:
+
+```bash
+lanwatch serve
+```
+
+Open:
+
+```text
+http://127.0.0.1:5000
+```
+
+The dashboard shows the latest scan summary, new devices, changed IPs, offline devices, known devices, and recent history. Use the `Run Scan` button to execute a scan from the page.
+
+To bind another host or port:
+
+```bash
+lanwatch serve --host 0.0.0.0 --port 5000
+```
+
 ## How Detection Works
 
 LanWatch identifies devices primarily by MAC address. If a MAC address appears for the first time, it is reported as `new`. If a known MAC address appears with a different IP address, it is reported as `changed_ip`. If a known MAC address is missing from the current scan, it is reported as `offline` but is not deleted.
 
 ## Permissions
 
-ARP scanning uses raw sockets. On macOS and Linux this usually requires elevated privileges. For `scan` and `watch`, LanWatch automatically relaunches itself with `sudo` when needed, so the sudo password is requested once when the command starts. If `sudo` is not available or raw socket access is still denied, it exits with a clean message instead of a traceback.
+ARP scanning uses raw sockets. On macOS and Linux this usually requires elevated privileges. For `scan`, `watch`, and `serve`, LanWatch automatically relaunches itself with `sudo` when needed, so the sudo password is requested once when the command starts. If `sudo` is not available or raw socket access is still denied, it exits with a clean message instead of a traceback.
 
 ## Notes
 

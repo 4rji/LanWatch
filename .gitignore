@@ -18,9 +18,13 @@ dist/
 *.sqlite
 *.sqlite3
 *.log
+lanwatchgo/lanwatchgo
+lanwatchgo/lanwatchgo-state.json
+lanwatchgo/lanwatchgo-state.json.tmp
 
 # Local config and secrets
 config.yaml
+lanwatchgo/config.json
 .env
 .env.*
 

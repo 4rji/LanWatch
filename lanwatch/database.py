@@ -170,6 +170,17 @@ class DeviceDatabase:
             ).fetchall()
         return rows
 
+    def recent_history(self, limit: int = 20) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT scanned_at, mac_address, ip_address, vendor, hostname, status, previous_ip
+            FROM scan_history
+            ORDER BY scanned_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
     def forget(self, identifier: str) -> int:
         mac = self._resolve_mac(identifier)
         if mac is None:

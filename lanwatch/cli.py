@@ -12,11 +12,10 @@ from rich.console import Console
 
 from lanwatch.config import Config, load_config
 from lanwatch.database import DeviceDatabase
-from lanwatch.models import DeviceObservation, normalize_mac
-from lanwatch.network import NetworkDetectionError, NetworkTarget, detect_networks
+from lanwatch.network import NetworkDetectionError
 from lanwatch.report import print_device_list, print_history, print_scan_report
-from lanwatch.scanner import PermissionScanError, ScanError, scan_subnet
-from lanwatch.vendor import VendorLookup
+from lanwatch.runner import run_scan
+from lanwatch.scanner import PermissionScanError, ScanError
 
 
 app = typer.Typer(help="LAN device discovery and change detection.")
@@ -70,18 +69,7 @@ def _run_scan(config: Config):
     _ensure_scan_privileges()
 
     try:
-        targets = detect_networks(config.interface, config.subnet, config.subnets)
-        vendor_lookup = VendorLookup()
-        observations_by_mac: dict[str, DeviceObservation] = {}
-        for target in targets:
-            observations = scan_subnet(
-                target.subnet,
-                target.interface,
-                config.scan_timeout,
-                vendor_lookup,
-            )
-            for observation in observations:
-                observations_by_mac[normalize_mac(observation.mac_address)] = observation
+        return run_scan(config)
     except NetworkDetectionError as exc:
         console.print(f"[red]Network detection failed:[/] {exc}")
         raise typer.Exit(2) from exc
@@ -91,26 +79,6 @@ def _run_scan(config: Config):
     except ScanError as exc:
         console.print(f"[red]Scan failed:[/] {exc}")
         raise typer.Exit(1) from exc
-
-    database = _db(config)
-    try:
-        subnet_label = ", ".join(str(target.subnet) for target in targets)
-        interface_label = _interface_label(targets)
-        return database.apply_scan(
-            list(observations_by_mac.values()),
-            subnet_label,
-            interface_label,
-            config.offline_threshold,
-        )
-    finally:
-        database.close()
-
-
-def _interface_label(targets: list[NetworkTarget]) -> str | None:
-    interfaces = sorted({target.interface for target in targets if target.interface})
-    if not interfaces:
-        return None
-    return ", ".join(interfaces)
 
 
 @app.command()
@@ -188,6 +156,28 @@ def forget(
         console.print(f"[green]Forgot device:[/] {identifier}")
     else:
         console.print(f"[yellow]No matching device found:[/] {identifier}")
+
+
+@app.command()
+def serve(
+    config: ConfigOption = None,
+    host: Annotated[str, typer.Option("--host", help="Host address to bind.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", "-p", help="Port to bind.")] = 5000,
+    no_sudo: Annotated[
+        bool,
+        typer.Option("--no-sudo", help="Do not auto-relaunch the server with sudo."),
+    ] = False,
+) -> None:
+    """Run the LanWatch web dashboard."""
+    loaded = _load(config)
+    if not no_sudo:
+        _ensure_scan_privileges()
+
+    from lanwatch.server import create_app
+
+    flask_app = create_app(loaded)
+    console.print(f"[bold]LanWatch web dashboard:[/] http://{host}:{port}")
+    flask_app.run(host=host, port=port)
 
 
 if __name__ == "__main__":
