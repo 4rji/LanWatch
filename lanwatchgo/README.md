@@ -130,6 +130,13 @@ The explicit flag version also works:
 
 Do not type square brackets like `[--host 127.0.0.1]`. In command docs, brackets only mean “optional”.
 
+The dashboard includes:
+
+- Summary counters for new devices in the last 10 minutes, active devices, changed IPs, offline devices, and total devices.
+- A highlighted table at the top for devices first seen in the last 10 minutes.
+- A device menu directly below that table with tabs for known active devices, history, subnets, changed IP, offline, and all devices.
+- One subnet tab per discovered subnet, based on the subnet stored for each device.
+
 ## Notes
 
 - This version does not require root for raw ARP sockets because it uses system `ping` plus the OS ARP/neighbor table.

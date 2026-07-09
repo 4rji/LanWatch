@@ -1237,7 +1237,8 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
 	"statusClass": func(status string) string {
 		return strings.ReplaceAll(status, "_", "-")
 	},
-	"dash": emptyDash,
+	"tabID": tabID,
+	"dash":  emptyDash,
 }).Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -1245,34 +1246,65 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LanWatch Go</title>
   <style>
-    body { margin: 0; background: #f5f7fa; color: #1d2733; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; }
-    header { background: #102033; color: #f8fafc; padding: 18px 24px; }
+    :root {
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --text: #1d2733;
+      --muted: #657487;
+      --line: #d9e1ea;
+      --head: #102033;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --ok: #166534;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; }
+    header { background: var(--head); color: #f8fafc; padding: 18px 24px; }
     main { padding: 20px 24px 36px; }
     h1 { margin: 0; font-size: 22px; }
-    h2 { font-size: 15px; margin: 22px 0 10px; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
     .meta { color: #cbd5e1; margin-top: 4px; }
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    button, .button { background: #0f766e; border: 1px solid #115e59; color: white; border-radius: 6px; padding: 8px 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
-    input { border: 1px solid #d9e1ea; border-radius: 6px; padding: 8px 10px; min-width: 260px; }
+    button, .button { min-height: 36px; background: var(--accent); border: 1px solid var(--accent-strong); color: white; border-radius: 6px; padding: 8px 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
+    input { min-height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-width: 260px; }
     .notice { background: #fff7ed; border: 1px solid #fed7aa; color: #7c2d12; border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; }
     .summary { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; margin: 18px 0 22px; }
-    .metric { background: white; border: 1px solid #d9e1ea; border-radius: 8px; padding: 12px; }
-    .metric span { display: block; color: #657487; font-size: 12px; text-transform: uppercase; }
-    .metric strong { display: block; font-size: 28px; margin-top: 5px; }
-    .split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 18px; align-items: start; }
-    .table-wrap { overflow-x: auto; background: white; border: 1px solid #d9e1ea; border-radius: 8px; }
-    table { width: 100%; border-collapse: collapse; min-width: 780px; }
-    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #d9e1ea; white-space: nowrap; }
+    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-height: 76px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .metric strong { display: block; font-size: 28px; margin-top: 5px; line-height: 1; }
+    .highlight { margin-bottom: 18px; }
+    .device-tabs { margin-top: 18px; }
+    .device-tabs-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .device-tabs-head .subtle { color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; min-width: 860px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
     th { background: #eef3f8; font-size: 12px; text-transform: uppercase; color: #334155; }
     tr:last-child td { border-bottom: 0; }
-    code { background: #eef3f8; border: 1px solid #d9e1ea; border-radius: 5px; padding: 2px 5px; }
-    .empty { background: white; border: 1px solid #d9e1ea; border-radius: 8px; padding: 16px; color: #657487; }
+    code { background: #eef3f8; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+    .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; color: var(--muted); }
     .status { border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; display: inline-block; }
-    .new { background: #dcfce7; color: #166534; }
+    .new { background: #dcfce7; color: var(--ok); }
     .known { background: #e0f2fe; color: #075985; }
-    .changed-ip { background: #fef3c7; color: #b45309; }
-    .offline { background: #fee2e2; color: #b91c1c; }
-    @media (max-width: 860px) { .summary, .split { grid-template-columns: 1fr; } }
+    .changed-ip { background: #fef3c7; color: var(--warn); }
+    .offline { background: #fee2e2; color: var(--danger); }
+    .tabs { margin-top: 0; }
+    .tabbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; background: #e8eef5; border: 1px solid var(--line); border-radius: 8px; padding: 5px; }
+    .tabbar button { background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 6px; min-height: 36px; }
+    .tabbar button.active { background: var(--panel); border-color: #c7d2df; color: var(--accent-strong); box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
+    .tabbar button span { color: var(--muted); font-weight: 650; margin-left: 5px; }
+    .tabbar.compact button { min-height: 34px; padding: 7px 10px; }
+    .tabpanel { display: none; }
+    .tabpanel.active { display: block; }
+    .history-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    @media (max-width: 860px) {
+      main, header { padding-left: 14px; padding-right: 14px; }
+      .summary { grid-template-columns: 1fr 1fr; }
+      .device-tabs-head { align-items: flex-start; flex-direction: column; }
+      input { min-width: 0; width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -1289,42 +1321,109 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
     {{ if .Error }}<div class="notice">{{ .Error }}</div>{{ end }}
     <div class="bar">
       <a class="button" href="/">Refresh</a>
-      <form method="get" action="/">
-        <input name="history" value="{{ .HistoryQuery }}" placeholder="MAC or IP history">
-        <button type="submit">History</button>
-      </form>
     </div>
     <div class="summary">
-      <div class="metric"><span>New</span><strong>{{ if .Report }}{{ len .Report.New }}{{ else }}0{{ end }}</strong></div>
-      <div class="metric"><span>Changed IP</span><strong>{{ if .Report }}{{ len .Report.ChangedIP }}{{ else }}0{{ end }}</strong></div>
-      <div class="metric"><span>Offline</span><strong>{{ if .Report }}{{ len .Report.Offline }}{{ else }}0{{ end }}</strong></div>
-      <div class="metric"><span>Known</span><strong>{{ if .Report }}{{ len .Report.Known }}{{ else }}0{{ end }}</strong></div>
+      <div class="metric"><span>New 10 min</span><strong>{{ len .NewRecent }}</strong></div>
+      <div class="metric"><span>Active</span><strong>{{ len .Active }}</strong></div>
+      <div class="metric"><span>Changed IP</span><strong>{{ len .Changed }}</strong></div>
+      <div class="metric"><span>Offline</span><strong>{{ len .Offline }}</strong></div>
       <div class="metric"><span>Total</span><strong>{{ len .Devices }}</strong></div>
     </div>
-    <div class="split">
-      <div>
-        {{ if .Report }}
-          {{ template "devices" dict "Title" "New devices" "Rows" .Report.New }}
-          {{ template "devices" dict "Title" "Changed IP" "Rows" .Report.ChangedIP }}
-          {{ template "devices" dict "Title" "Offline" "Rows" .Report.Offline }}
-          {{ template "devices" dict "Title" "Known active" "Rows" .Report.Known }}
-        {{ end }}
-        {{ template "devices" dict "Title" "All known devices" "Rows" .Devices }}
+
+    <section class="highlight">
+      <h2>New devices connected in the last 10 minutes</h2>
+      {{ template "devices" dict "Rows" .NewRecent }}
+    </section>
+
+    <section class="device-tabs">
+      <div class="device-tabs-head">
+        <h2>Devices</h2>
+        <div class="subtle">{{ len .Devices }} total</div>
       </div>
-      <div>
-        {{ template "history" .History }}
+      <div class="tabs" data-tabs="main">
+        <div class="tabbar">
+          <button type="button" class="{{ if not .HistoryQuery }}active{{ end }}" data-tab-button="main" data-tab-target="tab-active">Known active <span>{{ len .Active }}</span></button>
+          <button type="button" class="{{ if .HistoryQuery }}active{{ end }}" data-tab-button="main" data-tab-target="tab-history">History</button>
+          <button type="button" data-tab-button="main" data-tab-target="tab-subnets">Subnets <span>{{ len .SubnetGroups }}</span></button>
+          <button type="button" data-tab-button="main" data-tab-target="tab-changed">Changed IP <span>{{ len .Changed }}</span></button>
+          <button type="button" data-tab-button="main" data-tab-target="tab-offline">Offline <span>{{ len .Offline }}</span></button>
+          <button type="button" data-tab-button="main" data-tab-target="tab-all">All devices <span>{{ len .Devices }}</span></button>
+        </div>
+
+        <section id="tab-active" class="tabpanel {{ if not .HistoryQuery }}active{{ end }}" data-tab-panel="main">
+          {{ template "devices" dict "Rows" .Active }}
+        </section>
+
+        <section id="tab-history" class="tabpanel {{ if .HistoryQuery }}active{{ end }}" data-tab-panel="main">
+          <form class="history-form" method="get" action="/">
+            <input name="history" value="{{ .HistoryQuery }}" placeholder="MAC or IP history">
+            <button type="submit">Filter</button>
+            {{ if .HistoryQuery }}<a class="button" href="/">Clear</a>{{ end }}
+          </form>
+          {{ template "history" .History }}
+        </section>
+
+        <section id="tab-subnets" class="tabpanel" data-tab-panel="main">
+          {{ if .SubnetGroups }}
+          <div class="tabs" data-tabs="subnets">
+            <div class="tabbar compact">
+              {{ range $idx, $group := .SubnetGroups }}
+              {{ $id := tabID "subnet" .Name }}
+              <button type="button" class="{{ if eq $idx 0 }}active{{ end }}" data-tab-button="subnets" data-tab-target="{{ $id }}">{{ .Name }} <span>{{ len .Devices }}</span></button>
+              {{ end }}
+            </div>
+            {{ range $idx, $group := .SubnetGroups }}
+            {{ $id := tabID "subnet" .Name }}
+            <section id="{{ $id }}" class="tabpanel {{ if eq $idx 0 }}active{{ end }}" data-tab-panel="subnets">
+              {{ template "devices" dict "Rows" .Devices }}
+            </section>
+            {{ end }}
+          </div>
+          {{ else }}
+          <div class="empty">No subnet data yet.</div>
+          {{ end }}
+        </section>
+
+        <section id="tab-changed" class="tabpanel" data-tab-panel="main">
+          {{ template "devices" dict "Rows" .Changed }}
+        </section>
+
+        <section id="tab-offline" class="tabpanel" data-tab-panel="main">
+          {{ template "devices" dict "Rows" .Offline }}
+        </section>
+
+        <section id="tab-all" class="tabpanel" data-tab-panel="main">
+          {{ template "devices" dict "Rows" .Devices }}
+        </section>
       </div>
-    </div>
+    </section>
   </main>
+  <script>
+    document.querySelectorAll("[data-tabs]").forEach(function(group) {
+      var name = group.getAttribute("data-tabs");
+      var buttons = group.querySelectorAll('[data-tab-button="' + name + '"]');
+      var panels = group.querySelectorAll('[data-tab-panel="' + name + '"]');
+      buttons.forEach(function(button) {
+        button.addEventListener("click", function() {
+          var target = button.getAttribute("data-tab-target");
+          buttons.forEach(function(item) { item.classList.remove("active"); });
+          panels.forEach(function(panel) { panel.classList.remove("active"); });
+          button.classList.add("active");
+          var panel = document.getElementById(target);
+          if (panel) {
+            panel.classList.add("active");
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
 
 {{ define "devices" }}
-<section>
-  <h2>{{ .Title }}</h2>
   {{ if .Rows }}
   <div class="table-wrap"><table>
-    <thead><tr><th>Status</th><th>IP</th><th>MAC</th><th>Key</th><th>Interface</th><th>Hostname</th><th>Vendor</th><th>Last Seen</th></tr></thead>
+    <thead><tr><th>Status</th><th>IP</th><th>MAC</th><th>Key</th><th>Subnet</th><th>Interface</th><th>Hostname</th><th>Vendor</th><th>Last Seen</th></tr></thead>
     <tbody>
       {{ range .Rows }}
       <tr>
@@ -1332,6 +1431,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
         <td>{{ .IP }}</td>
         <td>{{ dash .MAC }}</td>
         <td>{{ .KeyType }}</td>
+        <td>{{ dash .Subnet }}</td>
         <td>{{ dash .Interface }}</td>
         <td>{{ dash .Hostname }}</td>
         <td>{{ dash .Vendor }}</td>
@@ -1343,7 +1443,6 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
   {{ else }}
   <div class="empty">None</div>
   {{ end }}
-</section>
 {{ end }}
 
 {{ define "history" }}
@@ -1383,6 +1482,86 @@ func recentHistory(history []HistoryEvent, query string, limit int) []HistoryEve
 		rows = append(rows, event)
 	}
 	return rows
+}
+
+func recentNewDevices(state *State, window time.Duration) []DeviceRecord {
+	cutoff := time.Now().UTC().Add(-window)
+	seen := make(map[string]bool)
+	var rows []DeviceRecord
+
+	for i := len(state.History) - 1; i >= 0; i-- {
+		event := state.History[i]
+		if event.Status != "new" || seen[event.Key] {
+			continue
+		}
+		scannedAt, err := time.Parse(time.RFC3339, event.ScannedAt)
+		if err != nil || scannedAt.Before(cutoff) {
+			continue
+		}
+		seen[event.Key] = true
+		record, ok := state.Devices[event.Key]
+		if !ok {
+			record = DeviceRecord{
+				Key:       event.Key,
+				KeyType:   event.KeyType,
+				IP:        event.IP,
+				MAC:       event.MAC,
+				Vendor:    event.Vendor,
+				Hostname:  event.Hostname,
+				Interface: event.Interface,
+				Subnet:    event.Subnet,
+				FirstSeen: event.ScannedAt,
+			}
+		}
+		record.LastStatus = "new"
+		record.LastSeen = event.ScannedAt
+		if record.FirstSeen == "" {
+			record.FirstSeen = event.ScannedAt
+		}
+		rows = append(rows, record)
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].LastSeen > rows[j].LastSeen
+	})
+	return rows
+}
+
+func filterDevices(devices []DeviceRecord, keep func(DeviceRecord) bool) []DeviceRecord {
+	rows := make([]DeviceRecord, 0, len(devices))
+	for _, device := range devices {
+		if keep(device) {
+			rows = append(rows, device)
+		}
+	}
+	return rows
+}
+
+func buildSubnetGroups(devices []DeviceRecord) []SubnetDeviceGroup {
+	grouped := make(map[string][]DeviceRecord)
+	for _, device := range devices {
+		subnet := device.Subnet
+		if subnet == "" {
+			subnet = "unknown"
+		}
+		grouped[subnet] = append(grouped[subnet], device)
+	}
+
+	names := make([]string, 0, len(grouped))
+	for name := range grouped {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	groups := make([]SubnetDeviceGroup, 0, len(names))
+	for _, name := range names {
+		rows := grouped[name]
+		sort.Slice(rows, func(i, j int) bool {
+			return ipToUint32(net.ParseIP(rows[i].IP)) < ipToUint32(net.ParseIP(rows[j].IP))
+		})
+		groups = append(groups, SubnetDeviceGroup{Name: name, Devices: rows})
+	}
+	return groups
 }
 
 func historyMatches(event HistoryEvent, identifier, normalizedMAC string) bool {
@@ -1569,4 +1748,28 @@ func emptyDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func tabID(prefix, value string) string {
+	var builder strings.Builder
+	builder.WriteString(prefix)
+	builder.WriteString("-")
+	lastDash := false
+	for _, char := range strings.ToLower(value) {
+		isSafe := (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+		if isSafe {
+			builder.WriteRune(char)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteString("-")
+			lastDash = true
+		}
+	}
+	result := strings.TrimRight(builder.String(), "-")
+	if result == prefix {
+		return prefix + "-unknown"
+	}
+	return result
 }
