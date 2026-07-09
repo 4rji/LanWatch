@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lanwatch"
+version = "0.1.0"
+description = "LAN device discovery and change detection CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "psutil>=5.9",
+  "pyyaml>=6.0",
+  "rich>=13.0",
+  "scapy>=2.5",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+netifaces = ["netifaces>=0.11"]
+
+[project.scripts]
+lanwatch = "lanwatch.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["lanwatch*"]

@@ -1,0 +1,6 @@
+scan_interval: 60
+subnet:
+interface:
+offline_threshold: 0
+database_path: lanwatch.db
+scan_timeout: 2.0

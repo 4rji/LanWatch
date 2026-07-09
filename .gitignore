@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local runtime data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+
+# Local config and secrets
+config.yaml
+.env
+.env.*
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent cache
+.atl/skill-registry.md
+.atl/.skill-registry.cache.json
