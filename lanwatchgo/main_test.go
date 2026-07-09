@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"strings"
 	"testing"
 )
@@ -77,5 +78,32 @@ func TestDashboardTemplateRendersTabs(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected dashboard to contain %q", expected)
 		}
+	}
+}
+
+func TestSubnetAddressCount(t *testing.T) {
+	_, network, err := net.ParseCIDR("172.17.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := subnetAddressCount(network); got != 65536 {
+		t.Fatalf("expected 65536 addresses, got %d", got)
+	}
+}
+
+func TestApplyScanPositionalsInterfacesAlias(t *testing.T) {
+	var interfaces stringList
+	if err := applyScanPositionals([]string{"interfaces", "enp0s3"}, &interfaces); err != nil {
+		t.Fatalf("apply positionals: %v", err)
+	}
+	if len(interfaces) != 1 || interfaces[0] != "enp0s3" {
+		t.Fatalf("expected enp0s3, got %#v", interfaces)
+	}
+}
+
+func TestApplyScanPositionalsRejectsWrongCommand(t *testing.T) {
+	var interfaces stringList
+	if err := applyScanPositionals([]string{"serve", "0.0.0.0", "50001"}, &interfaces); err == nil {
+		t.Fatal("expected unexpected arguments error")
 	}
 }

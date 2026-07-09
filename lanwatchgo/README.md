@@ -35,6 +35,8 @@ Example:
 ```json
 {
   "scan_interval": 60,
+  "interfaces": [],
+  "exclude_interfaces": [],
   "extra_subnets": [
     "10.10.65.0/24",
     "10.10.66.0/24"
@@ -52,12 +54,32 @@ Example:
 "extra_subnets": []
 ```
 
+`interfaces` can be left empty to scan all active running interfaces. If a host has Docker, bridge, or other virtual interfaces and you want only the real LAN interface, set:
+
+```json
+"interfaces": ["enp0s3"]
+```
+
+or use the CLI flag:
+
+```bash
+./lanwatchgo scan --interface enp0s3
+```
+
+Interfaces that are down or have no carrier/running state are skipped automatically. Large auto-detected subnets are skipped with a warning instead of aborting the scan. Explicit `extra_subnets` are still protected by `max_hosts_per_subnet`.
+
 ## Usage
 
 Run one scan:
 
 ```bash
 ./lanwatchgo scan
+```
+
+Run one scan on a specific interface:
+
+```bash
+./lanwatchgo scan --interface enp0s3
 ```
 
 Add more subnets without editing config:
@@ -96,6 +118,7 @@ Show detected local interface subnets:
 
 ```bash
 ./lanwatchgo interfaces
+./lanwatchgo interfaces --interface enp0s3
 ```
 
 Run the web dashboard:
@@ -103,6 +126,8 @@ Run the web dashboard:
 ```bash
 ./lanwatchgo serve
 ```
+
+`serve` is its own command. Do not put it after `scan`.
 
 Open:
 

@@ -1,8 +1,12 @@
 {
   "scan_interval": 60,
+  "interfaces": ["enp0s3"],
+  "exclude_interfaces": [],
   "extra_subnets": [
     "10.10.65.0/24",
-    "10.10.66.0/24"
+    "10.10.66.0/24",
+    "10.10.67.0/24",
+    "10.10.68.0/24"
   ],
   "state_path": "lanwatchgo-state.json",
   "ping_timeout_ms": 700,
