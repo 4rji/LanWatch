@@ -14,6 +14,7 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 class Config:
     scan_interval: int = 60
     subnet: str | None = None
+    subnets: list[str] | None = None
     interface: str | None = None
     offline_threshold: int = 0
     database_path: str = "lanwatch.db"
@@ -38,4 +39,14 @@ def load_config(path: Path | None) -> Config:
         raise ValueError(f"Unknown config option(s): {keys}")
 
     values: dict[str, Any] = {key: value for key, value in raw.items() if value is not None}
+    if values.get("subnet") and values.get("subnets"):
+        raise ValueError("Use either 'subnet' or 'subnets', not both.")
+
+    subnets = values.get("subnets")
+    if subnets is not None:
+        if not isinstance(subnets, list) or not all(isinstance(item, str) for item in subnets):
+            raise ValueError("'subnets' must be a list of subnet strings.")
+        if not subnets:
+            values.pop("subnets")
+
     return Config(**values)

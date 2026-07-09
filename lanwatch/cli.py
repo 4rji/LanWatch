@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Annotated
@@ -9,7 +12,8 @@ from rich.console import Console
 
 from lanwatch.config import Config, load_config
 from lanwatch.database import DeviceDatabase
-from lanwatch.network import NetworkDetectionError, detect_network
+from lanwatch.models import DeviceObservation, normalize_mac
+from lanwatch.network import NetworkDetectionError, NetworkTarget, detect_networks
 from lanwatch.report import print_device_list, print_history, print_scan_report
 from lanwatch.scanner import PermissionScanError, ScanError, scan_subnet
 from lanwatch.vendor import VendorLookup
@@ -37,15 +41,47 @@ def _db(config: Config) -> DeviceDatabase:
     return DeviceDatabase(config.database_path)
 
 
-def _run_scan(config: Config):
-    try:
-        target = detect_network(config.interface, config.subnet)
-        observations = scan_subnet(
-            target.subnet,
-            target.interface,
-            config.scan_timeout,
-            VendorLookup(),
+def _ensure_scan_privileges() -> None:
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return
+
+    sudo_path = shutil.which("sudo")
+    if sudo_path is None:
+        console.print(
+            "[yellow]Permission required:[/] ARP scanning requires raw socket "
+            "privileges, but sudo was not found. Run this command as root/admin."
         )
+        raise typer.Exit(1)
+
+    console.print("[yellow]ARP scanning needs raw socket privileges. Relaunching with sudo...[/]")
+    os.execvp(
+        sudo_path,
+        [
+            sudo_path,
+            sys.executable,
+            "-m",
+            "lanwatch.cli",
+            *sys.argv[1:],
+        ],
+    )
+
+
+def _run_scan(config: Config):
+    _ensure_scan_privileges()
+
+    try:
+        targets = detect_networks(config.interface, config.subnet, config.subnets)
+        vendor_lookup = VendorLookup()
+        observations_by_mac: dict[str, DeviceObservation] = {}
+        for target in targets:
+            observations = scan_subnet(
+                target.subnet,
+                target.interface,
+                config.scan_timeout,
+                vendor_lookup,
+            )
+            for observation in observations:
+                observations_by_mac[normalize_mac(observation.mac_address)] = observation
     except NetworkDetectionError as exc:
         console.print(f"[red]Network detection failed:[/] {exc}")
         raise typer.Exit(2) from exc
@@ -58,14 +94,23 @@ def _run_scan(config: Config):
 
     database = _db(config)
     try:
+        subnet_label = ", ".join(str(target.subnet) for target in targets)
+        interface_label = _interface_label(targets)
         return database.apply_scan(
-            observations,
-            str(target.subnet),
-            target.interface,
+            list(observations_by_mac.values()),
+            subnet_label,
+            interface_label,
             config.offline_threshold,
         )
     finally:
         database.close()
+
+
+def _interface_label(targets: list[NetworkTarget]) -> str | None:
+    interfaces = sorted({target.interface for target in targets if target.interface})
+    if not interfaces:
+        return None
+    return ", ".join(interfaces)
 
 
 @app.command()

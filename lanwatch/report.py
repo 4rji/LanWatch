@@ -12,7 +12,7 @@ from lanwatch.models import DeviceRecord, ScanReport
 def print_scan_report(console: Console, report: ScanReport) -> None:
     console.rule("[bold]LAN Watch Scan")
     console.print(
-        f"[bold]Subnet:[/] {report.subnet}    "
+        f"[bold]Subnet(s):[/] {report.subnet}    "
         f"[bold]Interface:[/] {report.interface or 'auto'}    "
         f"[bold]Active:[/] {report.total_active}    "
         f"[bold]Scanned:[/] {_format_dt(report.scanned_at)}"

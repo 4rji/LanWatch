@@ -58,10 +58,27 @@ database_path: lanwatch.db
 scan_timeout: 2.0
 ```
 
+To scan multiple subnets, use `subnets` instead of `subnet`:
+
+```yaml
+scan_interval: 60
+subnets:
+  - 192.168.1.0/24
+  - 192.168.10.0/24
+  - 10.0.0.0/24
+interface: en0
+offline_threshold: 0
+database_path: lanwatch.db
+scan_timeout: 2.0
+```
+
+Do not set `subnet` and `subnets` at the same time. LanWatch will reject that config so the scan target is unambiguous.
+
 Config options:
 
 - `scan_interval`: seconds between scans when using `watch`.
 - `subnet`: optional subnet override, for example `192.168.1.0/24`.
+- `subnets`: optional list of subnet overrides. Use this instead of `subnet` when scanning multiple networks.
 - `interface`: optional interface override, for example `en0` or `eth0`.
 - `offline_threshold`: seconds since `last_seen` before a missing device is reported as offline. The default `0` reports missing known devices as offline on the next scan.
 - `database_path`: SQLite database path.
@@ -72,13 +89,13 @@ Config options:
 Run one scan:
 
 ```bash
-sudo lanwatch scan
+lanwatch scan
 ```
 
 Keep scanning:
 
 ```bash
-sudo lanwatch watch --interval 30
+lanwatch watch --interval 30
 ```
 
 List known devices:
@@ -103,7 +120,7 @@ lanwatch forget aa:bb:cc:dd:ee:ff
 Use a custom config file:
 
 ```bash
-sudo lanwatch scan --config ./config.yaml
+lanwatch scan --config ./config.yaml
 ```
 
 ## How Detection Works
@@ -112,7 +129,7 @@ LanWatch identifies devices primarily by MAC address. If a MAC address appears f
 
 ## Permissions
 
-ARP scanning uses raw sockets. On macOS and Linux this usually requires elevated privileges. If LanWatch is not run with enough permissions, it exits with a clean message instead of a traceback.
+ARP scanning uses raw sockets. On macOS and Linux this usually requires elevated privileges. For `scan` and `watch`, LanWatch automatically relaunches itself with `sudo` when needed, so the sudo password is requested once when the command starts. If `sudo` is not available or raw socket access is still denied, it exits with a clean message instead of a traceback.
 
 ## Notes
 
