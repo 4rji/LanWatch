@@ -2,6 +2,10 @@
 
 LanWatch is a local network watcher for discovering devices on your LAN and detecting changes over time. It scans the active IPv4 subnet with ARP, stores device state in SQLite, and reports new devices, changed IP addresses, offline devices, and known active devices.
 
+## Interface
+
+![LanWatch web dashboard interface](server.png)
+
 ## Features
 
 - Auto-detects the active network interface and subnet.
